@@ -5,6 +5,7 @@ import webbrowser
 from contextlib import asynccontextmanager
 from typing import Optional
 
+import anthropic
 import uvicorn
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -14,6 +15,25 @@ from pydantic import BaseModel
 import config
 from extractors import youtube, web as web_extractor, file as file_extractor
 from pipeline import claims as claims_pipeline, players as player_matcher, airtable
+
+
+def _raise_claude_error(exc: Exception) -> None:
+    """Convert Anthropic SDK errors into readable HTTPExceptions."""
+    if isinstance(exc, anthropic.AuthenticationError):
+        raise HTTPException(401, "Anthropic API key is invalid or missing. Check your .env file.")
+    if isinstance(exc, anthropic.PermissionDeniedError):
+        raise HTTPException(403, "Anthropic API permission denied. Check your API key scopes.")
+    if isinstance(exc, (anthropic.RateLimitError,)):
+        raise HTTPException(429, "Anthropic rate limit hit. Wait a moment and try again.")
+    if isinstance(exc, anthropic.APIStatusError):
+        # Covers 402 (insufficient credits), 500s, etc.
+        msg = str(exc)
+        if "credit" in msg.lower() or "billing" in msg.lower():
+            raise HTTPException(402, f"Anthropic billing issue: {exc.message if hasattr(exc, 'message') else msg}")
+        raise HTTPException(exc.status_code, f"Anthropic API error ({exc.status_code}): {exc.message if hasattr(exc, 'message') else msg}")
+    if isinstance(exc, anthropic.APIConnectionError):
+        raise HTTPException(503, f"Could not connect to Anthropic API: {exc}")
+    raise HTTPException(500, f"Claude error: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -132,14 +152,21 @@ async def extract(
     if not raw_text:
         raise HTTPException(400, "Could not extract any text from the provided input.")
 
-    # Run Claude — metadata first, then claims (can be parallelised later)
-    meta = claims_pipeline.extract_metadata(raw_text)
+    # Run Claude — metadata first, then claims
+    try:
+        meta = claims_pipeline.extract_metadata(raw_text)
+    except Exception as e:
+        _raise_claude_error(e)
+
     # Merge extractor hints (higher priority than Claude inferences)
     for k, v in hints.items():
         if v:
             meta[k] = v
 
-    raw_claims = claims_pipeline.extract_claims(raw_text)
+    try:
+        raw_claims = claims_pipeline.extract_claims(raw_text)
+    except Exception as e:
+        _raise_claude_error(e)
 
     # Run player matching on extracted claims
     enriched_claims = []

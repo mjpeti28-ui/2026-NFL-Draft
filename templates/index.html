@@ -287,16 +287,28 @@ window.onload = async () => {
 
 async function loadCacheInfo() {
   try {
-    const [p, s] = await Promise.all([
-      fetch('/api/players').then(r => r.json()),
-      fetch('/api/sources').then(r => r.json()),
+    const [pr, sr] = await Promise.all([
+      fetch('/api/players'),
+      fetch('/api/sources'),
     ]);
-    allPlayers = p;
-    allSources = s;
+    const p = await pr.json();
+    const s = await sr.json();
+
+    if (!pr.ok) {
+      const msg = p.detail || 'Airtable error';
+      document.getElementById('cache-info').textContent = '⚠ ' + msg;
+      document.getElementById('cache-info').style.background = '#7f1d1d';
+      return;
+    }
+
+    allPlayers = Array.isArray(p) ? p : [];
+    allSources = Array.isArray(s) ? s : [];
     document.getElementById('cache-info').textContent =
-      `${p.length} players · ${s.length} sources`;
+      `${allPlayers.length} players · ${allSources.length} sources`;
+    document.getElementById('cache-info').style.background = '';
   } catch (e) {
-    document.getElementById('cache-info').textContent = 'Cache error';
+    document.getElementById('cache-info').textContent = '⚠ Could not connect';
+    document.getElementById('cache-info').style.background = '#7f1d1d';
   }
 }
 
@@ -365,8 +377,17 @@ async function runExtract() {
 
   try {
     const resp = await fetch('/api/extract', { method: 'POST', body: fd });
-    const data = await resp.json();
-    if (!resp.ok) { setStatus('error', data.detail || 'Extraction failed.'); enableBtn(); return; }
+    let data;
+    try {
+      data = await resp.json();
+    } catch (_) {
+      setStatus('error', `Server error (HTTP ${resp.status}). Check the terminal for details.`);
+      enableBtn(); return;
+    }
+    if (!resp.ok) {
+      const msg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+      setStatus('error', msg || `Error ${resp.status}`); enableBtn(); return;
+    }
 
     extractedData = data;
     const reviewMode = document.getElementById('review-toggle').checked;

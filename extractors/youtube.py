@@ -2,7 +2,12 @@
 
 import re
 import httpx
-from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import (
+    NoTranscriptFound,
+    TranscriptsDisabled,
+    VideoUnavailable,
+)
 
 
 def _extract_video_id(url: str) -> str | None:
@@ -21,8 +26,8 @@ def _extract_video_id(url: str) -> str | None:
 def _fetch_oembed_metadata(video_id: str) -> dict:
     """Fetch title and author via YouTube oEmbed (no API key needed)."""
     try:
-        url = f"https://www.youtube.com/oembed?url=https://youtu.be/{video_id}&format=json"
-        resp = httpx.get(url, timeout=10, follow_redirects=True)
+        oembed_url = f"https://www.youtube.com/oembed?url=https://youtu.be/{video_id}&format=json"
+        resp = httpx.get(oembed_url, timeout=10, follow_redirects=True)
         if resp.status_code == 200:
             data = resp.json()
             return {
@@ -54,25 +59,40 @@ def extract(url: str) -> dict:
 
     meta = _fetch_oembed_metadata(video_id)
 
+    # v1.x API: instantiate the class, use .fetch()
+    ytt = YouTubeTranscriptApi()
+
     try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+        transcript = ytt.fetch(video_id)
+        snippets = list(transcript)
     except NoTranscriptFound:
-        # Try any available language
+        # Try listing all available transcripts and pick one
         try:
-            t = YouTubeTranscriptApi.list_transcripts(video_id)
-            transcript_list = t.find_generated_transcript(
-                [tr.language_code for tr in t]
-            ).fetch()
+            transcript_list = ytt.list(video_id)
+            # Prefer manually created, then auto-generated
+            available = list(transcript_list)
+            if not available:
+                raise ValueError(f"No transcripts available for video {video_id}")
+            chosen = available[0]
+            snippets = list(chosen.fetch())
+        except NoTranscriptFound:
+            raise ValueError(f"No transcript found for video {video_id}")
         except Exception as e:
-            raise ValueError(f"No transcript available for video {video_id}: {e}")
+            raise ValueError(f"Could not retrieve transcript for {video_id}: {e}")
     except TranscriptsDisabled:
         raise ValueError(f"Transcripts are disabled for video {video_id}")
+    except VideoUnavailable:
+        raise ValueError(f"Video {video_id} is unavailable")
     except Exception as e:
         raise ValueError(f"Failed to fetch transcript: {e}")
 
-    text = " ".join(seg["text"] for seg in transcript_list)
+    # v1.x snippets have .text attribute
+    text = " ".join(
+        s.text if hasattr(s, "text") else s["text"]
+        for s in snippets
+    )
     # Clean up common transcript artifacts
-    text = re.sub(r"\[.*?\]", "", text)          # remove [Music], [Applause] etc.
+    text = re.sub(r"\[.*?\]", "", text)       # remove [Music], [Applause] etc.
     text = re.sub(r"\s+", " ", text).strip()
 
     return {
