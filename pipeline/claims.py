@@ -117,18 +117,22 @@ def extract_claims(text: str) -> list[dict]:
         source_analyst, position, school
     """
     # For very long content, chunk it to avoid token limits
-    chunks = _chunk_text(text, max_chars=60_000)
+    chunks = _chunk_text(text, max_chars=40_000)
     all_claims = []
 
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
         prompt = CLAIMS_PROMPT.format(text=chunk)
-        raw = _call_claude(prompt, max_tokens=8192)
+        raw = _call_claude(prompt, max_tokens=16000)
         try:
             claims = _parse_json_response(raw)
             if isinstance(claims, list):
                 all_claims.extend(claims)
-        except json.JSONDecodeError:
-            # If JSON parse fails, skip this chunk rather than crash
+            else:
+                print(f"  [claims] chunk {i+1}: unexpected response type {type(claims)}")
+        except json.JSONDecodeError as e:
+            # Log the failure so we can debug — don't silently swallow
+            print(f"  [claims] chunk {i+1}/{len(chunks)}: JSON parse failed: {e}")
+            print(f"  [claims] raw response (first 500 chars): {raw[:500]}")
             continue
 
     # Normalize and validate

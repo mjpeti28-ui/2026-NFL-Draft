@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)  # override=True ensures .env values win over parent process env vars
 
 def _require(key: str) -> str:
     val = os.environ.get(key)
