@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NFL Draft Ingestion</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    min-height: 100vh;
+    padding: 24px 16px;
+  }
+
+  h1 { font-size: 1.4rem; font-weight: 700; color: #fff; letter-spacing: -0.02em; }
+  h2 { font-size: 1rem; font-weight: 600; color: #94a3b8; margin-bottom: 12px; }
+
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .badge { background: #1e40af; color: #93c5fd; font-size: 0.7rem;
+           padding: 3px 8px; border-radius: 999px; font-weight: 600; }
+
+  /* Layout */
+  .layout { display: grid; grid-template-columns: 380px 1fr; gap: 20px; max-width: 1400px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: #1a1f2e;
+    border: 1px solid #2d3748;
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tab {
+    flex: 1; padding: 8px; text-align: center; font-size: 0.8rem; font-weight: 600;
+    border: 1px solid #2d3748; border-radius: 8px; cursor: pointer;
+    color: #64748b; background: transparent; transition: all .15s;
+  }
+  .tab.active { background: #1e3a5f; border-color: #3b82f6; color: #93c5fd; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Form elements */
+  label { display: block; font-size: 0.75rem; color: #64748b;
+          margin-bottom: 4px; font-weight: 500; }
+  input[type="text"], input[type="url"], textarea, select {
+    width: 100%; background: #0f1117; border: 1px solid #2d3748;
+    color: #e2e8f0; border-radius: 8px; padding: 10px 12px;
+    font-size: 0.85rem; outline: none; transition: border-color .15s;
+  }
+  input:focus, textarea:focus, select:focus { border-color: #3b82f6; }
+  textarea { resize: vertical; min-height: 140px; font-family: inherit; }
+
+  /* Drop zone */
+  .dropzone {
+    border: 2px dashed #2d3748; border-radius: 10px; padding: 32px 16px;
+    text-align: center; cursor: pointer; transition: all .15s; color: #64748b;
+  }
+  .dropzone:hover, .dropzone.drag-over {
+    border-color: #3b82f6; background: #0f1a2e; color: #93c5fd;
+  }
+  .dropzone input { display: none; }
+  .dropzone p { font-size: 0.8rem; margin-top: 8px; }
+  .dropzone .file-icon { font-size: 2rem; }
+  .filename-display { font-size: 0.8rem; color: #10b981; margin-top: 8px;
+                      min-height: 20px; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 20px; border-radius: 8px; font-size: 0.85rem;
+    font-weight: 600; cursor: pointer; border: none; transition: all .15s;
+  }
+  .btn-primary { background: #2563eb; color: #fff; width: 100%; justify-content: center; }
+  .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+  .btn-success { background: #059669; color: #fff; }
+  .btn-success:hover:not(:disabled) { background: #047857; }
+  .btn-ghost { background: transparent; color: #64748b; border: 1px solid #2d3748; }
+  .btn-ghost:hover { border-color: #4b5563; color: #94a3b8; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .row { display: flex; gap: 8px; margin-top: 12px; }
+  .row .btn { flex: 1; justify-content: center; }
+
+  /* Options row */
+  .options-row {
+    display: flex; align-items: center; gap: 12px;
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid #1e2535;
+  }
+  .toggle { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #64748b; }
+  .toggle input[type="checkbox"] { accent-color: #3b82f6; width: 14px; height: 14px; }
+
+  /* Status / spinner */
+  .status { padding: 12px; border-radius: 8px; font-size: 0.82rem; margin-top: 12px; }
+  .status.info    { background: #1e3a5f; color: #93c5fd; border: 1px solid #1d4ed8; }
+  .status.error   { background: #3b0a0a; color: #fca5a5; border: 1px solid #7f1d1d; }
+  .status.success { background: #064e3b; color: #6ee7b7; border: 1px solid #065f46; }
+  .spinner { display: inline-block; width: 14px; height: 14px;
+             border: 2px solid transparent; border-top-color: currentColor;
+             border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Right panel sections */
+  .section { margin-bottom: 20px; }
+  .section-title {
+    font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .06em; color: #475569; margin-bottom: 10px;
+    padding-bottom: 8px; border-bottom: 1px solid #1e2535;
+  }
+
+  /* Metadata form grid */
+  .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .meta-grid .full { grid-column: 1 / -1; }
+
+  /* Claims table */
+  .claims-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .claims-count { font-size: 0.8rem; color: #64748b; }
+
+  .claims-table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th {
+    text-align: left; padding: 8px 10px; font-size: 0.72rem; font-weight: 600;
+    color: #64748b; text-transform: uppercase; letter-spacing: .04em;
+    border-bottom: 1px solid #1e2535; white-space: nowrap;
+  }
+  td { padding: 7px 10px; border-bottom: 1px solid #1a2030; vertical-align: top; }
+  tr:hover td { background: #1e2535; }
+
+  td input, td select { padding: 4px 8px; font-size: 0.8rem; }
+  td .claim-text-input { width: 100%; min-width: 220px; }
+
+  /* Confidence badges */
+  .badge-high { color: #34d399; font-size: 0.68rem; }
+  .badge-low  { color: #fbbf24; font-size: 0.68rem; }
+  .badge-new  { color: #f87171; font-size: 0.68rem; }
+
+  .player-cell { min-width: 160px; }
+  .player-select { width: 100%; }
+  .player-conf { display: block; margin-top: 2px; }
+
+  .delete-btn {
+    background: none; border: none; color: #ef4444; cursor: pointer;
+    font-size: 1rem; padding: 0 4px; opacity: 0.6;
+  }
+  .delete-btn:hover { opacity: 1; }
+
+  /* Submit area */
+  .submit-area {
+    position: sticky; bottom: 0; background: #1a1f2e;
+    border-top: 1px solid #2d3748; padding: 16px 0 0; margin-top: 16px;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .submit-summary { font-size: 0.8rem; color: #64748b; flex: 1; }
+
+  /* Progress */
+  .progress-bar-wrap { background: #1e2535; border-radius: 999px; height: 6px;
+                       overflow: hidden; margin-top: 6px; }
+  .progress-bar { height: 100%; background: #2563eb; transition: width .3s;
+                  border-radius: 999px; }
+
+  /* New source form */
+  .new-source-form { margin-top: 10px; display: none; }
+  .new-source-form.visible { display: block; }
+  .source-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  .field { margin-bottom: 12px; }
+  .hint { font-size: 0.72rem; color: #475569; margin-top: 3px; }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center; padding: 48px 20px; color: #475569;
+  }
+  .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+  .empty-state p { font-size: 0.85rem; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🏈 NFL Draft Ingestion</h1>
+  <span class="badge" id="cache-info">Loading...</span>
+</div>
+
+<div class="layout">
+  <!-- LEFT: Input panel -->
+  <div>
+    <div class="panel">
+      <h2>Input</h2>
+
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('url')">URL</button>
+        <button class="tab" onclick="switchTab('text')">Text</button>
+        <button class="tab" onclick="switchTab('file')">File</button>
+      </div>
+
+      <!-- URL tab -->
+      <div class="tab-content active" id="tab-url">
+        <div class="field">
+          <label>YouTube, article, or Substack URL</label>
+          <input type="url" id="url-input" placeholder="https://..." />
+        </div>
+      </div>
+
+      <!-- Text tab -->
+      <div class="tab-content" id="tab-text">
+        <div class="field">
+          <label>Paste transcript, notes, or raw text</label>
+          <textarea id="text-input" placeholder="Paste content here..."></textarea>
+        </div>
+      </div>
+
+      <!-- File tab -->
+      <div class="tab-content" id="tab-file">
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+          <input type="file" id="file-input" accept=".xlsx,.xls,.csv,.txt"
+                 onchange="handleFileSelect(this)">
+          <div class="file-icon">📄</div>
+          <strong>Click to upload or drag & drop</strong>
+          <p>.xlsx · .xls · .csv · .txt</p>
+        </div>
+        <div class="filename-display" id="filename-display"></div>
+      </div>
+
+      <div class="options-row">
+        <label class="toggle">
+          <input type="checkbox" id="review-toggle" checked>
+          Review before submitting
+        </label>
+        <label class="toggle" style="margin-left:auto">
+          <input type="checkbox" id="haiku-toggle">
+          Fast mode (Haiku)
+        </label>
+      </div>
+
+      <div style="margin-top:12px">
+        <button class="btn btn-primary" id="extract-btn" onclick="runExtract()">
+          Extract Claims
+        </button>
+      </div>
+
+      <div id="status-area"></div>
+    </div>
+
+    <!-- Cache refresh -->
+    <div style="margin-top:10px; text-align:right;">
+      <button class="btn btn-ghost" style="font-size:0.75rem;padding:6px 12px"
+              onclick="refreshCache()">↻ Refresh player cache</button>
+    </div>
+  </div>
+
+  <!-- RIGHT: Review panel -->
+  <div id="right-panel">
+    <div class="empty-state">
+      <div class="icon">📋</div>
+      <p>Extract content to see claims here.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let currentTab = 'url';
+let selectedFile = null;
+let extractedData = null;
+let allPlayers = [];
+let allSources = [];
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+window.onload = async () => {
+  await loadCacheInfo();
+  setupDropzone();
+};
+
+async function loadCacheInfo() {
+  try {
+    const [p, s] = await Promise.all([
+      fetch('/api/players').then(r => r.json()),
+      fetch('/api/sources').then(r => r.json()),
+    ]);
+    allPlayers = p;
+    allSources = s;
+    document.getElementById('cache-info').textContent =
+      `${p.length} players · ${s.length} sources`;
+  } catch (e) {
+    document.getElementById('cache-info').textContent = 'Cache error';
+  }
+}
+
+async function refreshCache() {
+  await fetch('/api/refresh-cache', { method: 'POST' });
+  await loadCacheInfo();
+}
+
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+function switchTab(name) {
+  currentTab = name;
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const names = ['url', 'text', 'file'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+// ---------------------------------------------------------------------------
+// File upload
+// ---------------------------------------------------------------------------
+function setupDropzone() {
+  const dz = document.getElementById('dropzone');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) setFile(file);
+  });
+}
+
+function handleFileSelect(input) {
+  if (input.files[0]) setFile(input.files[0]);
+}
+
+function setFile(file) {
+  selectedFile = file;
+  document.getElementById('filename-display').textContent = `✓ ${file.name} (${(file.size/1024).toFixed(0)} KB)`;
+}
+
+// ---------------------------------------------------------------------------
+// Extract
+// ---------------------------------------------------------------------------
+async function runExtract() {
+  setStatus('info', '<span class="spinner"></span> Extracting content and running Claude...');
+  document.getElementById('extract-btn').disabled = true;
+
+  const fd = new FormData();
+  if (currentTab === 'url') {
+    const url = document.getElementById('url-input').value.trim();
+    if (!url) { setStatus('error', 'Please enter a URL.'); enableBtn(); return; }
+    fd.append('url', url);
+  } else if (currentTab === 'text') {
+    const txt = document.getElementById('text-input').value.trim();
+    if (!txt) { setStatus('error', 'Please paste some text.'); enableBtn(); return; }
+    fd.append('text', txt);
+  } else {
+    if (!selectedFile) { setStatus('error', 'Please select a file.'); enableBtn(); return; }
+    fd.append('file', selectedFile);
+  }
+
+  try {
+    const resp = await fetch('/api/extract', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (!resp.ok) { setStatus('error', data.detail || 'Extraction failed.'); enableBtn(); return; }
+
+    extractedData = data;
+    const reviewMode = document.getElementById('review-toggle').checked;
+
+    if (reviewMode) {
+      renderReviewPanel(data);
+      setStatus('success', `✓ Extracted ${data.claims.length} claims across ${data.player_count} players. Review and submit below.`);
+    } else {
+      // Skip review — submit immediately
+      setStatus('info', '<span class="spinner"></span> Submitting directly to Airtable...');
+      await autoSubmit(data);
+    }
+  } catch (e) {
+    setStatus('error', 'Request failed: ' + e.message);
+  }
+  enableBtn();
+}
+
+// ---------------------------------------------------------------------------
+// Review panel rendering
+// ---------------------------------------------------------------------------
+function renderReviewPanel(data) {
+  const { metadata, claims } = data;
+  const urlVal = currentTab === 'url' ? document.getElementById('url-input').value.trim() : '';
+
+  document.getElementById('right-panel').innerHTML = `
+    <div class="panel">
+      <div class="section">
+        <div class="section-title">Artifact Metadata</div>
+        <div class="meta-grid">
+          <div class="field full">
+            <label>Title</label>
+            <input type="text" id="m-title" value="${esc(metadata.title)}">
+          </div>
+          <div class="field">
+            <label>Content Type</label>
+            <select id="m-type">
+              ${['Video','Podcast Episode','Article','Thread','Other']
+                .map(t => `<option ${t===metadata.content_type?'selected':''}>${t}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Date Published</label>
+            <input type="text" id="m-date" value="${esc(metadata.date_published||'')}" placeholder="YYYY-MM-DD">
+          </div>
+          <div class="field full">
+            <label>Context / Topic</label>
+            <input type="text" id="m-context" value="${esc(metadata.context_topic||'')}">
+          </div>
+          <div class="field full">
+            <label>URL</label>
+            <input type="url" id="m-url" value="${esc(metadata.url||urlVal||'')}">
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Source</div>
+        <div class="field">
+          <label>Select existing source or create new</label>
+          <select id="source-select" onchange="toggleNewSource()">
+            <option value="">-- create new source --</option>
+            ${allSources.map(s =>
+              `<option value="${s.id}" ${s.name===metadata.source_name?'selected':''}>${s.name}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="new-source-form" id="new-source-form">
+          <div class="source-grid">
+            <div class="field">
+              <label>Source Name</label>
+              <input type="text" id="ns-name" value="${esc(metadata.source_name||'')}">
+            </div>
+            <div class="field">
+              <label>Platform</label>
+              <select id="ns-platform">
+                ${['YouTube','Podcast','Article','Substack','Twitter/X','TikTok','TV','Other']
+                  .map(p => `<option ${p===metadata.source_platform?'selected':''}>${p}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Channel / Publication</label>
+              <input type="text" id="ns-channel">
+            </div>
+            <div class="field">
+              <label>Homepage URL</label>
+              <input type="url" id="ns-url">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="claims-header">
+          <div class="section-title" style="margin:0">Claims <span id="claims-remaining">(${claims.length})</span></div>
+          <button class="btn btn-ghost" style="font-size:0.72rem;padding:4px 10px"
+                  onclick="addBlankClaim()">+ Add claim</button>
+        </div>
+
+        <div class="claims-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Type</th>
+                <th>Category</th>
+                <th>Claim</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="claims-tbody">
+              ${claims.map((c, i) => renderClaimRow(c, i)).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="submit-area">
+        <div class="submit-summary" id="submit-summary">
+          ${claims.length} claims ready
+        </div>
+        <button class="btn btn-success" id="submit-btn" onclick="submitToAirtable()">
+          Submit to Airtable →
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Auto-select new source form if no match found
+  toggleNewSource();
+  updateClaimsCount();
+}
+
+function renderClaimRow(c, i) {
+  const confClass = { high: 'badge-high', low: 'badge-low', new: 'badge-new' }[c.match_confidence] || '';
+  const confLabel = { high: '✓ matched', low: '⚠ low confidence', new: '+ new player' }[c.match_confidence] || '';
+  const rowClass = c.match_confidence === 'low' ? 'style="background:#1a1600"' :
+                   c.match_confidence === 'new' ? 'style="background:#1a0000"' : '';
+
+  const playerOptions = allPlayers.map(p =>
+    `<option value="${p.id}" ${c.player_id===p.id?'selected':''}>${p.name}</option>`
+  ).join('');
+
+  const typeOptions = ['Strength','Weakness','Projection','Trait','Scheme Fit','Red Flag',
+    'Comparison','Production','Context','Grade','Measurement','Medical/Character','Ranking','Development']
+    .map(t => `<option ${t===c.claim_type?'selected':''}>${t}</option>`).join('');
+
+  return `<tr id="row-${i}" ${rowClass}>
+    <td class="player-cell">
+      <select class="player-select" id="player-${i}" data-new="${c.match_confidence==='new'}">
+        <option value="">-- new player --</option>
+        ${playerOptions}
+      </select>
+      <span class="player-conf ${confClass}">${confLabel}</span>
+      ${c.match_confidence==='new' ? `<input type="text" style="margin-top:4px;font-size:0.78rem" placeholder="Name: ${esc(c.player_name)}" id="newname-${i}" value="${esc(c.player_name)}">` : ''}
+    </td>
+    <td style="min-width:120px">
+      <select id="type-${i}">${typeOptions}</select>
+    </td>
+    <td style="min-width:110px">
+      <input type="text" id="cat-${i}" value="${esc(c.category||'')}">
+    </td>
+    <td>
+      <textarea class="claim-text-input" id="claim-${i}" rows="2">${esc(c.claim_text)}</textarea>
+    </td>
+    <td>
+      <button class="delete-btn" onclick="deleteRow(${i})" title="Delete">✕</button>
+    </td>
+  </tr>`;
+}
+
+function toggleNewSource() {
+  const sel = document.getElementById('source-select');
+  const form = document.getElementById('new-source-form');
+  if (!sel || !form) return;
+  form.classList.toggle('visible', sel.value === '');
+}
+
+function deleteRow(i) {
+  const row = document.getElementById('row-' + i);
+  if (row) row.remove();
+  updateClaimsCount();
+}
+
+function addBlankClaim() {
+  const tbody = document.getElementById('claims-tbody');
+  const i = Date.now(); // unique id
+  const blank = {
+    player_name: '', player_id: null, match_confidence: 'new',
+    claim_type: 'Trait', category: '', claim_text: '',
+  };
+  tbody.insertAdjacentHTML('beforeend', renderClaimRow(blank, i));
+  updateClaimsCount();
+}
+
+function updateClaimsCount() {
+  const n = document.querySelectorAll('#claims-tbody tr:not([style*="display:none"])').length;
+  const el = document.getElementById('claims-remaining');
+  if (el) el.textContent = `(${n})`;
+  const summary = document.getElementById('submit-summary');
+  if (summary) summary.textContent = `${n} claims ready`;
+}
+
+// ---------------------------------------------------------------------------
+// Submit
+// ---------------------------------------------------------------------------
+function collectReviewData() {
+  const rows = document.querySelectorAll('#claims-tbody tr');
+  const claims = [];
+
+  rows.forEach(row => {
+    const i = row.id.replace('row-', '');
+    const claimText = (document.getElementById('claim-' + i)?.value || '').trim();
+    if (!claimText) return;
+
+    const playerSelect = document.getElementById('player-' + i);
+    const playerId = playerSelect?.value || null;
+    const newNameInput = document.getElementById('newname-' + i);
+    const playerName = newNameInput?.value || playerSelect?.options[playerSelect.selectedIndex]?.text || '';
+    const isNew = !playerId;
+
+    claims.push({
+      player_name: playerName,
+      player_id: playerId || null,
+      claim_text: claimText,
+      claim_type: document.getElementById('type-' + i)?.value || 'Trait',
+      category: document.getElementById('cat-' + i)?.value || '',
+      new_player: isNew,
+    });
+  });
+
+  const sourceSelect = document.getElementById('source-select');
+  const sourceId = sourceSelect?.value || null;
+
+  const source = sourceId ? { id: sourceId } : {
+    name: document.getElementById('ns-name')?.value || '',
+    platform: document.getElementById('ns-platform')?.value || 'Other',
+    channel: document.getElementById('ns-channel')?.value || '',
+    url: document.getElementById('ns-url')?.value || '',
+  };
+
+  const rawText = currentTab === 'text'
+    ? document.getElementById('text-input').value
+    : '';
+
+  return {
+    source,
+    metadata: {
+      title: document.getElementById('m-title')?.value || '',
+      content_type: document.getElementById('m-type')?.value || 'Other',
+      context_topic: document.getElementById('m-context')?.value || '',
+      date_published: document.getElementById('m-date')?.value || null,
+      url: document.getElementById('m-url')?.value || '',
+      raw_text: rawText,
+    },
+    claims,
+  };
+}
+
+async function submitToAirtable() {
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Submitting...';
+
+  const payload = collectReviewData();
+
+  if (!payload.claims.length) {
+    setStatus('error', 'No claims to submit.');
+    btn.disabled = false; btn.textContent = 'Submit to Airtable →';
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { setStatus('error', data.detail || 'Submit failed.'); return; }
+
+    setStatus('success',
+      `✓ Success! ${data.claims_created} claims added.` +
+      (data.new_players_created.length
+        ? ` New players created: ${data.new_players_created.join(', ')}.`
+        : '') +
+      ` Artifact ID: ${data.artifact_id}`
+    );
+
+    btn.textContent = '✓ Submitted';
+    await loadCacheInfo();
+  } catch (e) {
+    setStatus('error', 'Submit error: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Submit to Airtable →';
+  }
+}
+
+async function autoSubmit(data) {
+  const { metadata, claims } = data;
+  const urlVal = currentTab === 'url' ? document.getElementById('url-input').value.trim() : '';
+  const rawText = currentTab === 'text' ? document.getElementById('text-input').value : '';
+
+  // Best-guess source from extracted metadata
+  let sourceObj = {};
+  const matchedSource = allSources.find(s => s.name === metadata.source_name);
+  if (matchedSource) {
+    sourceObj = { id: matchedSource.id };
+  } else {
+    sourceObj = {
+      name: metadata.source_name || 'Unknown',
+      platform: metadata.source_platform || 'Other',
+    };
+  }
+
+  const payload = {
+    source: sourceObj,
+    metadata: {
+      title: metadata.title,
+      content_type: metadata.content_type,
+      context_topic: metadata.context_topic || '',
+      date_published: metadata.date_published || null,
+      url: metadata.url || urlVal,
+      raw_text: rawText,
+    },
+    claims: claims.map(c => ({
+      player_name: c.player_name,
+      player_id: c.player_id,
+      claim_text: c.claim_text,
+      claim_type: c.claim_type,
+      category: c.category,
+      position: c.position,
+      school: c.school,
+      new_player: c.match_confidence === 'new',
+    })),
+  };
+
+  try {
+    const resp = await fetch('/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const result = await resp.json();
+    if (!resp.ok) { setStatus('error', result.detail || 'Auto-submit failed.'); return; }
+    setStatus('success',
+      `✓ Auto-submitted! ${result.claims_created} claims, artifact ${result.artifact_id}.`
+    );
+    await loadCacheInfo();
+  } catch (e) {
+    setStatus('error', 'Auto-submit error: ' + e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function setStatus(type, msg) {
+  document.getElementById('status-area').innerHTML =
+    `<div class="status ${type}">${msg}</div>`;
+}
+
+function enableBtn() {
+  document.getElementById('extract-btn').disabled = false;
+}
+
+function esc(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>
