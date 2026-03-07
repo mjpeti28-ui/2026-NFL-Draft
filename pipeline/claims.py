@@ -164,25 +164,47 @@ def extract_claims(text: str) -> list[dict]:
 
 
 def _chunk_text(text: str, max_chars: int) -> list[str]:
-    """Split text into chunks at paragraph boundaries."""
+    """
+    Split text into chunks at paragraph or sentence boundaries.
+
+    YouTube transcripts often have no newlines, so we fall back to
+    splitting at sentence boundaries ('. ') when needed.
+    """
     if len(text) <= max_chars:
         return [text]
 
-    chunks = []
+    # Try paragraph splitting first
     paragraphs = text.split("\n")
-    current = []
-    current_len = 0
-
-    for para in paragraphs:
-        if current_len + len(para) > max_chars and current:
+    if len(paragraphs) > 1:
+        # Multi-line text — chunk by paragraphs
+        chunks = []
+        current: list[str] = []
+        current_len = 0
+        for para in paragraphs:
+            if current_len + len(para) > max_chars and current:
+                chunks.append("\n".join(current))
+                current = [para]
+                current_len = len(para)
+            else:
+                current.append(para)
+                current_len += len(para)
+        if current:
             chunks.append("\n".join(current))
-            current = [para]
-            current_len = len(para)
-        else:
-            current.append(para)
-            current_len += len(para)
+        return chunks
 
-    if current:
-        chunks.append("\n".join(current))
+    # Single-line text (e.g. YouTube transcript) — split at word boundaries
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + max_chars
+        if end >= len(text):
+            chunks.append(text[start:])
+            break
+        # Walk back to the nearest space so we don't cut mid-word
+        split_at = text.rfind(" ", start, end)
+        if split_at == -1 or split_at <= start:
+            split_at = end  # no space found, hard cut
+        chunks.append(text[start:split_at])
+        start = split_at + 1  # skip the space
 
     return chunks

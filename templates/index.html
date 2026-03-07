@@ -451,7 +451,7 @@ function renderReviewPanel(data) {
           <select id="source-select" onchange="toggleNewSource()">
             <option value="">-- create new source --</option>
             ${allSources.map(s =>
-              `<option value="${s.id}" ${s.name===metadata.source_name?'selected':''}>${s.name}</option>`
+              `<option value="${s.id}" ${s.id===data.suggested_source_id?'selected':''}>${s.name}</option>`
             ).join('')}
           </select>
         </div>
@@ -690,11 +690,10 @@ async function autoSubmit(data) {
   const urlVal = currentTab === 'url' ? document.getElementById('url-input').value.trim() : '';
   const rawText = currentTab === 'text' ? document.getElementById('text-input').value : '';
 
-  // Best-guess source from extracted metadata
+  // Best-guess source from extracted metadata (use server-side fuzzy match result)
   let sourceObj = {};
-  const matchedSource = allSources.find(s => s.name === metadata.source_name);
-  if (matchedSource) {
-    sourceObj = { id: matchedSource.id };
+  if (data.suggested_source_id) {
+    sourceObj = { id: data.suggested_source_id };
   } else {
     sourceObj = {
       name: metadata.source_name || 'Unknown',

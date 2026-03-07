@@ -184,11 +184,22 @@ async def extract(
     order = {"high": 0, "low": 1, "new": 2}
     enriched_claims.sort(key=lambda c: order.get(c["match_confidence"], 3))
 
+    # Fuzzy-match the detected source name against existing sources
+    suggested_source_id = None
+    suggested_source_name = None
+    if meta.get("source_name"):
+        matched_source = airtable.fuzzy_match_source(meta["source_name"])
+        if matched_source:
+            suggested_source_id = matched_source["id"]
+            suggested_source_name = matched_source["name"]
+
     return {
         "metadata": meta,
         "raw_text_length": len(raw_text),
         "claims": enriched_claims,
         "player_count": len({c["player_name"] for c in enriched_claims}),
+        "suggested_source_id": suggested_source_id,
+        "suggested_source_name": suggested_source_name,
     }
 
 

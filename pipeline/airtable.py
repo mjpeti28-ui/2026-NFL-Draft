@@ -1,7 +1,9 @@
 """Airtable REST API client for the 2026 NFL Draft base."""
 
+import re
 import httpx
 from typing import Optional
+from rapidfuzz import fuzz, process as fuzz_process
 import config
 
 AIRTABLE_BASE = "https://api.airtable.com/v0"
@@ -16,9 +18,16 @@ def _url(table_id: str) -> str:
 
 
 def _get_all(table_id: str, fields: list[str]) -> list[dict]:
-    """Fetch all records from a table, paginating automatically."""
+    """Fetch all records from a table, paginating automatically.
+
+    Uses returnFieldsByFieldId=true so response keys match our field-ID constants.
+    """
     records = []
-    params = {"fields[]": fields, "pageSize": 100}
+    params = {
+        "fields[]": fields,
+        "pageSize": 100,
+        "returnFieldsByFieldId": "true",
+    }
     with httpx.Client(timeout=30) as client:
         while True:
             resp = client.get(_url(table_id), headers=HEADERS(), params=params)
@@ -100,13 +109,18 @@ def get_source_cache() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def create_record(table_id: str, fields: dict) -> str:
-    """Create a single record; return its ID."""
+    """Create a single record; return its ID.
+
+    typecast=true auto-creates new singleSelect options.
+    """
     with httpx.Client(timeout=30) as client:
         resp = client.post(
             _url(table_id),
             headers=HEADERS(),
-            json={"fields": fields},
+            json={"fields": fields, "typecast": True},
         )
+        if not resp.is_success:
+            print(f"[airtable] create error {resp.status_code}: {resp.text[:500]}")
         resp.raise_for_status()
         return resp.json()["id"]
 
@@ -122,7 +136,11 @@ def update_record(table_id: str, record_id: str, fields: dict) -> None:
 
 
 def create_records_batch(table_id: str, fields_list: list[dict]) -> list[str]:
-    """Create up to 10 records per batch; return list of IDs."""
+    """Create up to 10 records per batch; return list of IDs.
+
+    typecast=true lets Airtable auto-create new singleSelect options instead
+    of returning 422 INVALID_MULTIPLE_CHOICE_OPTIONS for novel values.
+    """
     ids = []
     with httpx.Client(timeout=60) as client:
         for i in range(0, len(fields_list), 10):
@@ -130,8 +148,13 @@ def create_records_batch(table_id: str, fields_list: list[dict]) -> list[str]:
             resp = client.post(
                 _url(table_id),
                 headers=HEADERS(),
-                json={"records": [{"fields": f} for f in batch]},
+                json={
+                    "records": [{"fields": f} for f in batch],
+                    "typecast": True,
+                },
             )
+            if not resp.is_success:
+                print(f"[airtable] batch write error {resp.status_code}: {resp.text[:1000]}")
             resp.raise_for_status()
             ids.extend(r["id"] for r in resp.json()["records"])
     return ids
@@ -141,18 +164,42 @@ def create_records_batch(table_id: str, fields_list: list[dict]) -> list[str]:
 # High-level helpers
 # ---------------------------------------------------------------------------
 
+def _normalize_source_name(name: str) -> str:
+    """Lowercase, strip punctuation/underscores/spaces for fuzzy comparison."""
+    return re.sub(r"[\s_\-\.]+", "", name).lower()
+
+
+def fuzzy_match_source(name: str, threshold: int = 80) -> Optional[dict]:
+    """
+    Return the best matching source dict from cache, or None if below threshold.
+    Uses token-sort ratio on normalised names.
+    """
+    sources = get_source_cache()
+    if not sources:
+        return None
+    norm_query = _normalize_source_name(name)
+    # Build a mapping of normalised name → source
+    norm_map = {_normalize_source_name(s["name"]): s for s in sources}
+    match = fuzz_process.extractOne(
+        norm_query,
+        list(norm_map.keys()),
+        scorer=fuzz.token_sort_ratio,
+    )
+    if match and match[1] >= threshold:
+        return norm_map[match[0]]
+    return None
+
+
 def find_or_create_source(
     name: str,
     platform: str,
     channel: str = "",
     url: str = "",
 ) -> str:
-    """Return existing source ID or create a new one."""
-    sources = get_source_cache()
-    name_lower = name.lower().strip()
-    for s in sources:
-        if s["name"].lower().strip() == name_lower:
-            return s["id"]
+    """Return existing source ID (fuzzy-matched) or create a new one."""
+    existing = fuzzy_match_source(name)
+    if existing:
+        return existing["id"]
     fields: dict = {config.F_SOURCE_NAME: name}
     if platform:
         fields[config.F_SOURCE_PLATFORM] = platform
@@ -238,9 +285,7 @@ def create_claims_and_link(
 
     claim_ids = create_records_batch(config.TABLE_CLAIM, fields_list)
 
-    # Link claims back to the artifact (append, don't overwrite)
-    update_record(config.TABLE_ARTIFACT, artifact_id, {
-        config.F_ARTIFACT_CLAIMS: [{"id": cid} for cid in claim_ids],
-    })
+    # No need to separately link claims to the artifact — Airtable automatically
+    # maintains the bidirectional link when F_CLAIM_ARTIFACT is set on each Claim.
 
     return claim_ids
