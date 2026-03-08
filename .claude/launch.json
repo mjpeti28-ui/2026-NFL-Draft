@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "NFL Draft Ingestion",
+      "runtimeExecutable": "/Users/maxpetite/Desktop/personal projects/2026-NFL-Draft/.venv/bin/python",
+      "runtimeArgs": ["app.py"],
+      "port": 8000
+    }
+  ]
+}

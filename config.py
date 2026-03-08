@@ -60,6 +60,21 @@ VALID_CLAIM_TYPES = [
     "Measurement", "Medical/Character", "Ranking", "Development",
 ]
 
+VALID_CATEGORIES = [
+    # Physical
+    "Athleticism", "Speed / Burst", "Size / Measurements", "Strength / Power",
+    "Agility / Quickness", "Combine Results",
+    # Skill
+    "Route Running", "Ball Skills / Hands", "Blocking", "Pass Rush",
+    "Coverage", "Tackling", "Footwork", "Arm Talent", "Technique / Mechanics",
+    # Mental
+    "Football IQ", "Decision Making", "Leadership / Character",
+    # Context
+    "Draft Range", "Player Comparison", "Production / Stats",
+    "Competition Level", "Scheme Fit", "Injury / Medical", "Background / Bio",
+    "Age / Experience", "Overall Grade", "Projection Risk",
+]
+
 VALID_PLATFORMS = [
     "YouTube", "Podcast", "Article", "Substack", "Twitter/X", "TikTok", "TV", "Other"
 ]

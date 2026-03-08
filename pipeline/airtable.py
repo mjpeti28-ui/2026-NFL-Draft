@@ -135,6 +135,29 @@ def update_record(table_id: str, record_id: str, fields: dict) -> None:
         resp.raise_for_status()
 
 
+def update_records_batch(table_id: str, updates: list[dict]) -> None:
+    """PATCH up to 10 existing records at a time.
+
+    Each item in updates must have 'id' (record ID) and 'fields' (dict of
+    field-ID → new value). Only changed fields need to be included.
+    typecast=true allows new singleSelect option values to be created.
+    """
+    with httpx.Client(timeout=60) as client:
+        for i in range(0, len(updates), 10):
+            batch = updates[i:i + 10]
+            resp = client.patch(
+                _url(table_id),
+                headers=HEADERS(),
+                json={
+                    "records": [{"id": u["id"], "fields": u["fields"]} for u in batch],
+                    "typecast": True,
+                },
+            )
+            if not resp.is_success:
+                print(f"[airtable] batch update error {resp.status_code}: {resp.text[:500]}")
+            resp.raise_for_status()
+
+
 def create_records_batch(table_id: str, fields_list: list[dict]) -> list[str]:
     """Create up to 10 records per batch; return list of IDs.
 
